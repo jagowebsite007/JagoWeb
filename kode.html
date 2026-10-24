@@ -1,0 +1,979 @@
+/**
+ * FILE: kode.gs
+ * Fungsi: Menangani API JSON 2 arah (doPost & doGet) untuk koneksi dari Vercel/Hosting
+ * sekaligus mendukung HtmlService, upload gambar ke Google Drive dengan trik
+ * lh3.googleusercontent.com, manajemen Supplier, Kategori, Harga Supplier,
+ * Pengaturan Toko (Logo, Nomor WA Admin, QRIS, Rekening, Gmail), Notifikasi Email Pesanan,
+ * Ubah Password Admin, serta transaksi pesanan.
+ */
+
+const DEFAULT_ADMIN_PIN = 'Jangan@123';
+
+/**
+ * Menangani request GET:
+ * - Jika dipanggil dengan parameter ?action=getInitialData (atau dari fetch GET), kembalikan JSON.
+ * - Jika dibuka langsung di browser tanpa parameter action, kembalikan JSON data awal jika file index tidak ada di GAS,
+ *   atau tampilkan halaman HTML jika index.html ada di GAS.
+ */
+function doGet(e) {
+  const action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : '';
+
+  if (action === 'getInitialData' || (e && e.parameter && e.parameter.format === 'json')) {
+    return createJsonResponse(getInitialData());
+  }
+
+  if (action === 'trackOrder') {
+    const keyword = (e && e.parameter && e.parameter.keyword) ? e.parameter.keyword : '';
+    return createJsonResponse(trackOrder(keyword));
+  }
+
+  try {
+    return HtmlService.createHtmlOutputFromFile('index')
+      .setTitle('Hibualamo Store - Belanja Online Murah & Cepat')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  } catch (err) {
+    return createJsonResponse(getInitialData());
+  }
+}
+
+/**
+ * Menangani request POST dari Vercel / Hosting Eksternal (API Router 2 Arah)
+ * Menggunakan Content-Type: text/plain;charset=utf-8 agar bebas blokir CORS
+ */
+function doPost(e) {
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return createJsonResponse({ success: false, message: 'Tidak ada data yang dikirim ke server.' });
+    }
+
+    const body = JSON.parse(e.postData.contents);
+    const action = String(body.action || '');
+    const args = Array.isArray(body.args) ? body.args : [];
+
+    let result;
+    switch (action) {
+      case 'getInitialData':
+        result = getInitialData();
+        break;
+      case 'createOrder':
+        result = createOrder(args[0]);
+        break;
+      case 'trackOrder':
+        result = trackOrder(args[0]);
+        break;
+      case 'submitReview':
+        result = submitReview(args[0]);
+        break;
+      case 'adminGetOrders':
+        result = adminGetOrders(args[0]);
+        break;
+      case 'adminUpdateOrder':
+        result = adminUpdateOrder(args[0], args[1], args[2], args[3]);
+        break;
+      case 'adminUploadImageToDrive':
+        result = adminUploadImageToDrive(args[0], args[1], args[2], args[3]);
+        break;
+      case 'adminSavePaymentSettings':
+        result = adminSavePaymentSettings(args[0], args[1]);
+        break;
+      case 'adminSaveProduct':
+      case 'adminAddProduct':
+        result = adminSaveProduct(args[0], args[1]);
+        break;
+      case 'adminSaveSupplier':
+        result = adminSaveSupplier(args[0], args[1]);
+        break;
+      case 'adminDeleteSupplier':
+        result = adminDeleteSupplier(args[0], args[1]);
+        break;
+      case 'adminAddCategory':
+        result = adminAddCategory(args[0], args[1]);
+        break;
+      case 'adminDeleteCategory':
+        result = adminDeleteCategory(args[0], args[1]);
+        break;
+      case 'adminChangePassword':
+        result = adminChangePassword(args[0], args[1]);
+        break;
+      default:
+        result = { success: false, message: 'Aksi API tidak dikenali: ' + action };
+    }
+
+    return createJsonResponse(result);
+  } catch (err) {
+    return createJsonResponse({
+      success: false,
+      message: 'Error pada server Google Apps Script: ' + err.message
+    });
+  }
+}
+
+/**
+ * Helper pembungkus response JSON untuk komunikasi ke Vercel
+ */
+function createJsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Fungsi opsional untuk menyisipkan file HTML lain jika dibutuhkan
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/**
+ * Mengubah segala bentuk link Google Drive menjadi
+ * https://lh3.googleusercontent.com/d/{FILE_ID} agar tampil langsung & anti-blokir
+ */
+function formatDriveImageUrl(url) {
+  if (!url) return '';
+  const str = String(url).trim();
+  if (!str) return '';
+
+  if (str.indexOf('lh3.googleusercontent.com/d/') !== -1) {
+    return str;
+  }
+
+  const matchFileD = str.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (matchFileD && matchFileD[1]) {
+    return 'https://lh3.googleusercontent.com/d/' + matchFileD[1];
+  }
+
+  const matchParamId = str.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if (matchParamId && matchParamId[1]) {
+    return 'https://lh3.googleusercontent.com/d/' + matchParamId[1];
+  }
+
+  return str;
+}
+
+/**
+ * Membaca dan menyimpan nilai pada Sheet Pengaturan
+ */
+function getSettingValue(key, defaultValue) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Pengaturan');
+  if (!sheet) {
+    setupDatabase();
+    sheet = ss.getSheetByName('Pengaturan');
+  }
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(key)) {
+      return String(data[i][1]);
+    }
+  }
+  return defaultValue;
+}
+
+function setSettingValue(key, value) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Pengaturan');
+  if (!sheet) {
+    setupDatabase();
+    sheet = ss.getSheetByName('Pengaturan');
+  }
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(key)) {
+      sheet.getRange(i + 1, 2).setValue(String(value));
+      return;
+    }
+  }
+  sheet.appendRow([String(key), String(value)]);
+}
+
+function isValidAdminPin(pin) {
+  const currentPin = getSettingValue('Password_Admin', DEFAULT_ADMIN_PIN);
+  return String(pin).trim() === String(currentPin).trim();
+}
+
+/**
+ * Mengambil pengaturan Toko, Pembayaran, Nomor WA Admin, Logo & Gmail dari Sheet Pengaturan
+ */
+function getPaymentSettings() {
+  const qrisRaw = getSettingValue('QRIS_Url', 'https://placehold.co/300x300/1e293b/ffffff?text=QRIS+HibualamoStore');
+  const logoRaw = getSettingValue('Logo_Url', '');
+  return {
+    qrisUrl: formatDriveImageUrl(qrisRaw) || 'https://placehold.co/300x300/1e293b/ffffff?text=QRIS+HibualamoStore',
+    noRekening: getSettingValue('No_Rekening', 'Bank BCA: 8720192837'),
+    namaPemilikRekening: getSettingValue('Nama_Pemilik_Rekening', 'Hibualamo Store Official'),
+    gmailPemilik: getSettingValue('Gmail_Pemilik', ''),
+    noWaAdmin: getSettingValue('No_WA_Admin', '6281234567890'),
+    logoUrl: formatDriveImageUrl(logoRaw) || ''
+  };
+}
+
+/**
+ * Mengambil seluruh data awal (Produk, Kategori, Supplier, Ulasan, Pengaturan Toko & Pembayaran)
+ */
+function getInitialData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheetProduk = ss.getSheetByName('Produk');
+    if (
+      !sheetProduk ||
+      sheetProduk.getLastRow() <= 1 ||
+      !ss.getSheetByName('Supplier') ||
+      !ss.getSheetByName('Pengaturan')
+    ) {
+      setupDatabase();
+      sheetProduk = ss.getSheetByName('Produk');
+    }
+
+    const produk = getSheetDataAsObjects(sheetProduk)
+      .filter(p => p.ID_Produk && p.Nama)
+      .map(p => ({
+        id: String(p.ID_Produk),
+        nama: String(p.Nama),
+        kategori: String(p.Kategori || 'Lainnya'),
+        hargaSupplier: Number(p.Harga_Supplier) || 0,
+        hargaAsli: Number(p.Harga_Asli) || Number(p.Harga_Diskon) || 0,
+        hargaDiskon: Number(p.Harga_Diskon) || 0,
+        stok: Number(p.Stok) || 0,
+        terjual: Number(p.Terjual) || 0,
+        rating: Number(p.Rating) || 5.0,
+        gambar: formatDriveImageUrl(p.URL_Gambar),
+        varian: p.Varian ? String(p.Varian).split(',').map(v => v.trim()).filter(Boolean) : ['Standar'],
+        isFlashSale: p.Is_FlashSale === true || String(p.Is_FlashSale).toUpperCase() === 'TRUE',
+        badge: String(p.Badge || 'Star+'),
+        deskripsi: String(p.Deskripsi || ''),
+        idSupplier: String(p.ID_Supplier || ''),
+        namaSupplier: String(p.Nama_Supplier || '-')
+      }));
+
+    const supplier = getSheetDataAsObjects(ss.getSheetByName('Supplier'))
+      .filter(s => s.ID_Supplier && s.Nama_Supplier)
+      .map(s => ({
+        idSupplier: String(s.ID_Supplier),
+        namaSupplier: String(s.Nama_Supplier),
+        jenisSupplier: String(s.Jenis_Supplier || '-'),
+        alamat: String(s.Alamat || '-'),
+        kontakPerson: String(s.Kontak_Person || '-')
+      }));
+
+    const rawKategori = getSettingValue('Kategori', 'Elektronik,Fashion,Makanan,Aksesoris,Rumah Tangga');
+    const kategoriList = rawKategori.split(',').map(k => k.trim()).filter(Boolean);
+
+    const ulasan = getSheetDataAsObjects(ss.getSheetByName('Ulasan'))
+      .filter(u => u.ID_Produk)
+      .map(u => ({
+        id: String(u.ID_Ulasan || ''),
+        idProduk: String(u.ID_Produk || ''),
+        nama: String(u.Nama_Pembeli || 'Pembeli'),
+        rating: Number(u.Rating) || 5,
+        komentar: String(u.Komentar || ''),
+        varian: String(u.Varian || '-'),
+        tanggal: String(u.Tanggal || '')
+      }));
+
+    return {
+      success: true,
+      produk: produk,
+      voucher: [],
+      ulasan: ulasan,
+      supplier: supplier,
+      kategoriList: kategoriList,
+      pengaturanBayar: getPaymentSettings()
+    };
+  } catch (err) {
+    return { success: false, message: 'Gagal memuat data: ' + err.message };
+  }
+}
+
+/**
+ * Mengirim email notifikasi ke Gmail Pribadi Pemilik setiap ada pesanan/pembayaran baru
+ */
+function sendOrderEmailNotification(order, catatan) {
+  try {
+    let targetEmail = getSettingValue('Gmail_Pemilik', '').trim();
+    if (!targetEmail) {
+      targetEmail = Session.getEffectiveUser().getEmail();
+    }
+    if (!targetEmail) return;
+
+    const subject = '[Hibualamo Store] Pesanan & Pembayaran Baru #' + order.idPesanan + ' - ' + order.namaPembeli;
+    const itemsHtml = (order.items || []).map(it =>
+      '<li>' + it.qty + 'x <strong>' + it.nama + '</strong> (Variasi: ' + it.varian + ') - Rp' + Number(it.harga * it.qty).toLocaleString('id-ID') + '</li>'
+    ).join('');
+
+    const isPickupTruck = String(order.kurir || '').toLowerCase().indexOf('pick up') !== -1 || String(order.kurir || '').toLowerCase().indexOf('truck') !== -1;
+    const ongkirInfo = isPickupTruck
+      ? 'Tanyakan Harga Pengiriman via WA'
+      : 'Rp' + Number(order.ongkir).toLocaleString('id-ID');
+
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+        <div style="background: #ee4d2d; color: #ffffff; padding: 16px 20px;">
+          <h2 style="margin: 0; font-size: 18px;">Notifikasi Pesanan & Pembayaran Baru</h2>
+          <p style="margin: 4px 0 0; font-size: 12px; opacity: 0.9;">Hibualamo Store Official Web App</p>
+        </div>
+        <div style="padding: 20px; color: #1e293b; font-size: 14px; line-height: 1.6;">
+          <p style="margin-top: 0;">Halo Admin, ada pesanan baru yang masuk dengan rincian pembayaran berikut:</p>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px;">
+            <tr><td style="padding: 6px 0; color: #64748b; width: 40%;">ID Pesanan</td><td style="padding: 6px 0; font-weight: bold; color: #ee4d2d;">${order.idPesanan}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Waktu Transaksi</td><td style="padding: 6px 0;">${order.tanggal}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Nama Pembeli</td><td style="padding: 6px 0; font-weight: bold;">${order.namaPembeli}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Nomor WhatsApp</td><td style="padding: 6px 0;">${order.noWa}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Alamat Pengiriman</td><td style="padding: 6px 0;">${order.alamat}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Catatan Pembeli</td><td style="padding: 6px 0;">${catatan || '-'}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Opsi Pengiriman</td><td style="padding: 6px 0; font-weight: bold;">${order.kurir} (${ongkirInfo})</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Metode Pembayaran</td><td style="padding: 6px 0; font-weight: bold;">${order.metodeBayar}</td></tr>
+          </table>
+
+          <div style="background: #f8fafc; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
+            <strong style="display: block; margin-bottom: 6px; font-size: 13px;">Daftar Produk Dipesan:</strong>
+            <ul style="margin: 0; padding-left: 18px; font-size: 13px;">
+              ${itemsHtml}
+            </ul>
+          </div>
+
+          <div style="border-top: 2px solid #e2e8f0; padding-top: 12px; display: flex; justify-content: space-between; font-size: 16px; font-weight: bold;">
+            <span>Total Tagihan Pembayaran: </span>
+            <span style="color: #ee4d2d;">Rp${Number(order.totalBayar).toLocaleString('id-ID')}</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: targetEmail,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+  } catch (err) {
+    Logger.log('Gagal mengirim email notifikasi: ' + err.message);
+  }
+}
+
+/**
+ * Memproses pembuatan pesanan baru dengan LockService & mengirim notifikasi ke Gmail Pemilik
+ */
+function createOrder(payload) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetProduk = ss.getSheetByName('Produk');
+    const sheetPesanan = ss.getSheetByName('Pesanan');
+
+    const dataProduk = sheetProduk.getDataRange().getValues();
+    const headers = dataProduk[0];
+    const colStokIdx = headers.indexOf('Stok');
+    const colTerjualIdx = headers.indexOf('Terjual');
+
+    const items = payload.items || [];
+    if (items.length === 0) {
+      return { success: false, message: 'Keranjang belanja kosong.' };
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      let foundRowIndex = -1;
+      for (let r = 1; r < dataProduk.length; r++) {
+        if (String(dataProduk[r][0]) === String(item.id)) {
+          foundRowIndex = r;
+          break;
+        }
+      }
+      if (foundRowIndex === -1) {
+        return { success: false, message: 'Produk "' + item.nama + '" tidak ditemukan.' };
+      }
+      const currentStok = Number(dataProduk[foundRowIndex][colStokIdx]) || 0;
+      if (currentStok < Number(item.qty)) {
+        return {
+          success: false,
+          message: 'Stok "' + item.nama + '" tidak mencukupi (Sisa: ' + currentStok + ').'
+        };
+      }
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      for (let r = 1; r < dataProduk.length; r++) {
+        if (String(dataProduk[r][0]) === String(item.id)) {
+          const newStok = Number(dataProduk[r][colStokIdx]) - Number(item.qty);
+          const newTerjual = Number(dataProduk[r][colTerjualIdx]) + Number(item.qty);
+          sheetProduk.getRange(r + 1, colStokIdx + 1).setValue(newStok);
+          sheetProduk.getRange(r + 1, colTerjualIdx + 1).setValue(newTerjual);
+          break;
+        }
+      }
+    }
+
+    const orderId = 'ORD-' + Math.floor(1000 + Math.random() * 9000);
+    const tanggal = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    const ringkasanItem = items.map(it => it.qty + 'x ' + it.nama + ' (' + it.varian + ')').join(', ');
+    const statusAwal = 'Belum Bayar';
+
+    const newOrderRow = [
+      orderId,
+      tanggal,
+      payload.namaPembeli,
+      payload.noWa,
+      payload.alamat,
+      payload.catatan || '-',
+      JSON.stringify(items),
+      ringkasanItem,
+      Number(payload.subtotal) || 0,
+      Number(payload.ongkir) || 0,
+      0,
+      Number(payload.totalBayar) || 0,
+      payload.kurir,
+      payload.metodeBayar,
+      statusAwal,
+      '-'
+    ];
+
+    sheetPesanan.appendRow(newOrderRow);
+
+    const orderObj = {
+      idPesanan: orderId,
+      tanggal: tanggal,
+      namaPembeli: payload.namaPembeli,
+      noWa: payload.noWa,
+      alamat: payload.alamat,
+      ringkasanItem: ringkasanItem,
+      items: items,
+      subtotal: payload.subtotal,
+      ongkir: payload.ongkir,
+      diskonVoucher: 0,
+      totalBayar: payload.totalBayar,
+      kurir: payload.kurir,
+      metodeBayar: payload.metodeBayar,
+      status: statusAwal,
+      noResi: '-'
+    };
+
+    sendOrderEmailNotification(orderObj, payload.catatan);
+
+    return {
+      success: true,
+      order: orderObj
+    };
+  } catch (err) {
+    return { success: false, message: 'Gagal memproses pesanan: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Melacak daftar pesanan berdasarkan ID Pesanan atau Nomor WhatsApp
+ */
+function trackOrder(keyword) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetPesanan = ss.getSheetByName('Pesanan');
+    const rows = getSheetDataAsObjects(sheetPesanan);
+    const q = String(keyword || '').trim().toLowerCase();
+
+    if (!q) {
+      return { success: false, message: 'Masukkan ID Pesanan atau Nomor WhatsApp.' };
+    }
+
+    const matched = rows.filter(r => {
+      const idMatch = String(r.ID_Pesanan).toLowerCase().includes(q);
+      const waMatch = String(r.No_WA).replace(/\D/g, '').includes(q.replace(/\D/g, '')) && q.replace(/\D/g, '').length >= 6;
+      return idMatch || waMatch;
+    }).map(r => {
+      let parsedItems = [];
+      try {
+        parsedItems = JSON.parse(r.Daftar_Item_JSON || '[]');
+      } catch (e) {
+        parsedItems = [];
+      }
+      return {
+        idPesanan: String(r.ID_Pesanan),
+        tanggal: String(r.Tanggal),
+        namaPembeli: String(r.Nama_Pembeli),
+        noWa: String(r.No_WA),
+        alamat: String(r.Alamat),
+        catatan: String(r.Catatan),
+        items: parsedItems,
+        ringkasanItem: String(r.Ringkasan_Item),
+        subtotal: Number(r.Subtotal) || 0,
+        ongkir: Number(r.Ongkir) || 0,
+        diskonVoucher: Number(r.Diskon_Voucher) || 0,
+        totalBayar: Number(r.Total_Bayar) || 0,
+        kurir: String(r.Kurir),
+        metodeBayar: String(r.Metode_Bayar),
+        status: String(r.Status),
+        noResi: String(r.No_Resi || '-')
+      };
+    });
+
+    return {
+      success: true,
+      orders: matched.reverse()
+    };
+  } catch (err) {
+    return { success: false, message: 'Gagal melacak pesanan: ' + err.message };
+  }
+}
+
+/**
+ * Menyimpan ulasan dan rating dari pembeli (menggunakan waktu area pembeli)
+ * serta memperbarui rating rata-rata produk
+ */
+function submitReview(reviewData) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetUlasan = ss.getSheetByName('Ulasan');
+    const sheetProduk = ss.getSheetByName('Produk');
+
+    const revId = 'REV-' + Math.floor(1000 + Math.random() * 9000);
+    const bulanIndo = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const now = new Date();
+    const defaultIndoDate = now.getDate() + ' ' + bulanIndo[now.getMonth()] + ' ' + now.getFullYear() + ', ' +
+      Utilities.formatDate(now, Session.getScriptTimeZone(), 'HH:mm');
+    const tanggal = reviewData.tanggalLokal ? String(reviewData.tanggalLokal) : defaultIndoDate;
+
+    sheetUlasan.appendRow([
+      revId,
+      reviewData.idProduk,
+      reviewData.namaPembeli || 'Pembeli Hibualamo Store',
+      Number(reviewData.rating) || 5,
+      reviewData.komentar || 'Produk sangat bagus dan sesuai deskripsi.',
+      reviewData.varian || 'Standar',
+      tanggal
+    ]);
+
+    const allReviews = getSheetDataAsObjects(sheetUlasan).filter(u => String(u.ID_Produk) === String(reviewData.idProduk));
+    if (allReviews.length > 0) {
+      const avg = allReviews.reduce((acc, cur) => acc + (Number(cur.Rating) || 5), 0) / allReviews.length;
+      const roundedAvg = Math.round(avg * 10) / 10;
+
+      const prodValues = sheetProduk.getDataRange().getValues();
+      const colRatingIdx = prodValues[0].indexOf('Rating');
+      for (let r = 1; r < prodValues.length; r++) {
+        if (String(prodValues[r][0]) === String(reviewData.idProduk) && colRatingIdx !== -1) {
+          sheetProduk.getRange(r + 1, colRatingIdx + 1).setValue(roundedAvg);
+          break;
+        }
+      }
+    }
+
+    return {
+      success: true,
+      review: {
+        id: revId,
+        idProduk: reviewData.idProduk,
+        nama: reviewData.namaPembeli,
+        rating: Number(reviewData.rating) || 5,
+        komentar: reviewData.komentar,
+        varian: reviewData.varian || 'Standar',
+        tanggal: tanggal
+      }
+    };
+  } catch (err) {
+    return { success: false, message: 'Gagal mengirim ulasan: ' + err.message };
+  }
+}
+
+/**
+ * Mengambil data lengkap untuk Panel Admin (Pesanan, Produk, Supplier, Kategori, Pengaturan Toko)
+ */
+function adminGetOrders(pin) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin salah!' };
+  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const rows = getSheetDataAsObjects(ss.getSheetByName('Pesanan'));
+    const orders = rows.filter(r => r.ID_Pesanan).map(r => ({
+      idPesanan: String(r.ID_Pesanan),
+      tanggal: String(r.Tanggal),
+      namaPembeli: String(r.Nama_Pembeli),
+      noWa: String(r.No_WA),
+      ringkasanItem: String(r.Ringkasan_Item),
+      totalBayar: Number(r.Total_Bayar) || 0,
+      metodeBayar: String(r.Metode_Bayar),
+      status: String(r.Status),
+      noResi: String(r.No_Resi || '-')
+    })).reverse();
+
+    const initData = getInitialData();
+
+    return {
+      success: true,
+      orders: orders,
+      produk: initData.produk || [],
+      supplier: initData.supplier || [],
+      kategoriList: initData.kategoriList || [],
+      pengaturanBayar: initData.pengaturanBayar || getPaymentSettings()
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Mengubah status pesanan & nomor resi oleh Admin
+ */
+function adminUpdateOrder(pin, idPesanan, statusBaru, resiBaru) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetPesanan = ss.getSheetByName('Pesanan');
+    const data = sheetPesanan.getDataRange().getValues();
+
+    for (let r = 1; r < data.length; r++) {
+      if (String(data[r][0]) === String(idPesanan)) {
+        sheetPesanan.getRange(r + 1, 15).setValue(statusBaru);
+        sheetPesanan.getRange(r + 1, 16).setValue(resiBaru || '-');
+        return { success: true, message: 'Pesanan ' + idPesanan + ' berhasil diperbarui.' };
+      }
+    }
+    return { success: false, message: 'ID Pesanan tidak ditemukan.' };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Upload file gambar (Produk / QRIS / Logo Toko) dari komputer/HP ke Google Drive
+ * dan otomatis mengubah URL-nya menjadi https://lh3.googleusercontent.com/d/{FILE_ID}
+ */
+function adminUploadImageToDrive(pin, base64Data, fileName, mimeType) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const cleanBase64 = String(base64Data).replace(/^data:image\/\w+;base64,/, '');
+    const decoded = Utilities.base64Decode(cleanBase64);
+    const blob = Utilities.newBlob(decoded, mimeType || 'image/jpeg', fileName || ('img_' + new Date().getTime() + '.jpg'));
+
+    const folderName = 'HibualamoStore_Product_Images';
+    const folders = DriveApp.getFoldersByName(folderName);
+    const folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const fileId = file.getId();
+    const directUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
+
+    return {
+      success: true,
+      fileId: fileId,
+      url: directUrl,
+      message: 'Gambar berhasil diupload ke Google Drive!'
+    };
+  } catch (err) {
+    return {
+      success: false,
+      message: 'Gagal upload gambar ke Google Drive: ' + err.message
+    };
+  }
+}
+
+/**
+ * Menyimpan pengaturan Logo Toko, Nomor WA Admin, Pembayaran (QRIS, Nomor Rekening, Nama Pemilik Rekening) & Gmail Pemilik
+ */
+function adminSavePaymentSettings(pin, settings) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const formattedLogo = formatDriveImageUrl(settings.logoUrl) || '';
+    const formattedQris = formatDriveImageUrl(settings.qrisUrl) || 'https://placehold.co/300x300/1e293b/ffffff?text=QRIS+HibualamoStore';
+    const noRekening = String(settings.noRekening || '').trim();
+    const namaPemilikRekening = String(settings.namaPemilikRekening || '').trim();
+    const noWaAdmin = String(settings.noWaAdmin || '6281234567890').trim();
+    const gmailPemilik = String(settings.gmailPemilik || '').trim();
+
+    setSettingValue('Logo_Url', formattedLogo);
+    setSettingValue('QRIS_Url', formattedQris);
+    setSettingValue('No_Rekening', noRekening);
+    setSettingValue('Nama_Pemilik_Rekening', namaPemilikRekening);
+    setSettingValue('No_WA_Admin', noWaAdmin);
+    setSettingValue('Gmail_Pemilik', gmailPemilik);
+
+    return {
+      success: true,
+      pengaturanBayar: {
+        logoUrl: formattedLogo,
+        qrisUrl: formattedQris,
+        noRekening: noRekening,
+        namaPemilikRekening: namaPemilikRekening,
+        noWaAdmin: noWaAdmin,
+        gmailPemilik: gmailPemilik
+      },
+      message: 'Pengaturan Logo Toko, Nomor WA Admin, Pembayaran, & Gmail berhasil disimpan!'
+    };
+  } catch (err) {
+    return { success: false, message: 'Gagal menyimpan pengaturan: ' + err.message };
+  }
+}
+
+/**
+ * Menambah produk baru ATAU mengedit produk (Harga Jual, Harga Supplier, Kategori, Supplier, Gambar)
+ */
+function adminSaveProduct(pin, prod) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetProduk = ss.getSheetByName('Produk');
+    const data = sheetProduk.getDataRange().getValues();
+
+    const formattedImageUrl = formatDriveImageUrl(prod.gambar) || 'https://placehold.co/600x600/ee4d2d/ffffff?text=Produk+Baru';
+    const hargaSupplier = Number(prod.hargaSupplier) || 0;
+    const hargaDiskon = Number(prod.hargaDiskon) || 0;
+    const hargaAsli = Number(prod.hargaAsli) || hargaDiskon;
+    const stok = Number(prod.stok) || 0;
+    const varianStr = Array.isArray(prod.varian) ? prod.varian.join(',') : String(prod.varian || 'Standar');
+
+    if (prod.id) {
+      for (let r = 1; r < data.length; r++) {
+        if (String(data[r][0]) === String(prod.id)) {
+          const existingTerjual = Number(data[r][7]) || 0;
+          const existingRating = Number(data[r][8]) || 5.0;
+          const existingBadge = String(data[r][12] || 'Star+');
+
+          const updatedRow = [
+            String(prod.id),
+            prod.nama,
+            prod.kategori || 'Lainnya',
+            hargaSupplier,
+            hargaAsli,
+            hargaDiskon,
+            stok,
+            existingTerjual,
+            existingRating,
+            formattedImageUrl,
+            varianStr,
+            Boolean(prod.isFlashSale),
+            existingBadge,
+            prod.deskripsi || 'Produk berkualitas tinggi.',
+            prod.idSupplier || '',
+            prod.namaSupplier || '-'
+          ];
+
+          sheetProduk.getRange(r + 1, 1, 1, updatedRow.length).setValues([updatedRow]);
+          return {
+            success: true,
+            id: prod.id,
+            gambar: formattedImageUrl,
+            message: 'Data & harga produk "' + prod.nama + '" berhasil diperbarui!'
+          };
+        }
+      }
+    }
+
+    const newId = 'PRD-' + Math.floor(100 + Math.random() * 900);
+    const newRow = [
+      newId,
+      prod.nama,
+      prod.kategori || 'Lainnya',
+      hargaSupplier,
+      hargaAsli,
+      hargaDiskon,
+      stok,
+      0,
+      5.0,
+      formattedImageUrl,
+      varianStr,
+      Boolean(prod.isFlashSale),
+      prod.badge || 'Star+',
+      prod.deskripsi || 'Produk berkualitas tinggi dengan harga terjangkau.',
+      prod.idSupplier || '',
+      prod.namaSupplier || '-'
+    ];
+
+    sheetProduk.appendRow(newRow);
+    return {
+      success: true,
+      id: newId,
+      gambar: formattedImageUrl,
+      message: 'Produk baru berhasil ditambahkan!'
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function adminAddProduct(pin, prod) {
+  return adminSaveProduct(pin, prod);
+}
+
+/**
+ * Menambah atau mengedit data Supplier (Nama, Jenis, Alamat, Kontak Person)
+ */
+function adminSaveSupplier(pin, sup) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheetSupplier = ss.getSheetByName('Supplier');
+    if (!sheetSupplier) {
+      setupDatabase();
+      sheetSupplier = ss.getSheetByName('Supplier');
+    }
+
+    const data = sheetSupplier.getDataRange().getValues();
+
+    if (sup.idSupplier) {
+      for (let r = 1; r < data.length; r++) {
+        if (String(data[r][0]) === String(sup.idSupplier)) {
+          sheetSupplier.getRange(r + 1, 1, 1, 5).setValues([[
+            sup.idSupplier,
+            sup.namaSupplier,
+            sup.jenisSupplier,
+            sup.alamat,
+            sup.kontakPerson
+          ]]);
+          return { success: true, message: 'Data supplier berhasil diperbarui!' };
+        }
+      }
+    }
+
+    const newSupId = 'SUP-' + Math.floor(100 + Math.random() * 900);
+    sheetSupplier.appendRow([
+      newSupId,
+      sup.namaSupplier,
+      sup.jenisSupplier,
+      sup.alamat,
+      sup.kontakPerson
+    ]);
+
+    return {
+      success: true,
+      idSupplier: newSupId,
+      message: 'Supplier "' + sup.namaSupplier + '" berhasil ditambahkan!'
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Menghapus data Supplier
+ */
+function adminDeleteSupplier(pin, idSupplier) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetSupplier = ss.getSheetByName('Supplier');
+    const data = sheetSupplier.getDataRange().getValues();
+
+    for (let r = 1; r < data.length; r++) {
+      if (String(data[r][0]) === String(idSupplier)) {
+        sheetSupplier.deleteRow(r + 1);
+        return { success: true, message: 'Supplier berhasil dihapus.' };
+      }
+    }
+    return { success: false, message: 'Supplier tidak ditemukan.' };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Menambah Kategori Produk baru dari Panel Admin
+ */
+function adminAddCategory(pin, namaKategori) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const clean = String(namaKategori || '').trim();
+    if (!clean) return { success: false, message: 'Nama kategori tidak boleh kosong.' };
+
+    const raw = getSettingValue('Kategori', 'Elektronik,Fashion,Makanan,Aksesoris,Rumah Tangga');
+    const list = raw.split(',').map(k => k.trim()).filter(Boolean);
+
+    if (list.some(k => k.toLowerCase() === clean.toLowerCase())) {
+      return { success: false, message: 'Kategori tersebut sudah ada.' };
+    }
+
+    list.push(clean);
+    setSettingValue('Kategori', list.join(','));
+    return {
+      success: true,
+      kategoriList: list,
+      message: 'Kategori "' + clean + '" berhasil ditambahkan!'
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Menghapus Kategori Produk dari Panel Admin
+ */
+function adminDeleteCategory(pin, namaKategori) {
+  if (!isValidAdminPin(pin)) {
+    return { success: false, message: 'Password / PIN Admin tidak valid!' };
+  }
+  try {
+    const raw = getSettingValue('Kategori', 'Elektronik,Fashion,Makanan,Aksesoris,Rumah Tangga');
+    const list = raw.split(',').map(k => k.trim()).filter(k => k && k !== namaKategori);
+    setSettingValue('Kategori', list.join(','));
+    return {
+      success: true,
+      kategoriList: list,
+      message: 'Kategori "' + namaKategori + '" dihapus.'
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Mengubah Password / PIN Panel Admin
+ */
+function adminChangePassword(oldPin, newPin) {
+  if (!isValidAdminPin(oldPin)) {
+    return { success: false, message: 'Password / PIN lama yang Anda masukkan salah!' };
+  }
+  const cleanNew = String(newPin || '').trim();
+  if (cleanNew.length < 4) {
+    return { success: false, message: 'Password / PIN baru minimal 4 karakter.' };
+  }
+  try {
+    setSettingValue('Password_Admin', cleanNew);
+    return {
+      success: true,
+      message: 'Password Panel Admin berhasil diubah!'
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Helper: Mengubah baris Google Sheet menjadi Array of Objects berdasarkan nama Header
+ */
+function getSheetDataAsObjects(sheet) {
+  if (!sheet) return [];
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return [];
+
+  const headers = values[0].map(h => String(h).trim());
+  const result = [];
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const isRowEmpty = row.every(cell => cell === '' || cell === null || cell === undefined);
+    if (isRowEmpty) continue;
+
+    const obj = {};
+    for (let j = 0; j < headers.length; j++) {
+      obj[headers[j]] = row[j];
+    }
+    result.push(obj);
+  }
+  return result;
+}
