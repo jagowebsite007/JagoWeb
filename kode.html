@@ -300,9 +300,9 @@ function sendOrderEmailNotification(order, catatan) {
       '<li>' + it.qty + 'x <strong>' + it.nama + '</strong> (Variasi: ' + it.varian + ') - Rp' + Number(it.harga * it.qty).toLocaleString('id-ID') + '</li>'
     ).join('');
 
-    const isPickupTruck = String(order.kurir || '').toLowerCase().indexOf('pick up') !== -1 || String(order.kurir || '').toLowerCase().indexOf('truck') !== -1;
+    const isPickupTruck = String(order.kurir || '').toLowerCase().indexOf('luar kota') !== -1 || String(order.kurir || '').toLowerCase().indexOf('pick up') !== -1 || String(order.kurir || '').toLowerCase().indexOf('truck') !== -1;
     const ongkirInfo = isPickupTruck
-      ? 'Tanyakan Harga Pengiriman via WA'
+      ? 'Tanyakan Via WA Admin'
       : 'Rp' + Number(order.ongkir).toLocaleString('id-ID');
 
     const htmlBody = `
