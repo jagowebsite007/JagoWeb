@@ -168,7 +168,7 @@
               data-scroll-to="flashSaleSection"
               class="bg-white text-Hibualamo font-bold text-xs sm:text-sm px-4 py-2 rounded-lg shadow hover:bg-orange-50 transition cursor-pointer"
             >
-              <i class="fa-solid fa-bolt text-amber-500 mr-1"></i> Lihat Flash Sale
+              <i class="fa-solid fa-fire text-amber-500 mr-1"></i> Lihat Produk Terlaris
             </button>
           </div>
         </div>
@@ -177,26 +177,17 @@
       </div>
     </section>
 
-    <!-- FLASH SALE SECTION -->
+    <!-- PRODUK TERLARIS SECTION -->
     <section id="flashSaleSection" class="bg-white rounded-2xl p-3 sm:p-3.5 shadow-sm border border-orange-100">
       <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-100">
         <div class="flex items-center gap-2.5">
-          <div class="flex items-center gap-1.5 text-Hibualamo font-extrabold text-sm sm:text-base tracking-tight italic">
-            <i class="fa-solid fa-bolt text-amber-500 animate-bounce"></i> FLASH SALE
-          </div>
-          <!-- Countdown Timer -->
-          <div class="flex items-center gap-1 text-[11px] font-bold text-white">
-            <span id="fsHours" class="bg-slate-900 px-1.5 py-0.5 rounded">02</span>
-            <span class="text-slate-900 font-extrabold">:</span>
-            <span id="fsMinutes" class="bg-slate-900 px-1.5 py-0.5 rounded">45</span>
-            <span class="text-slate-900 font-extrabold">:</span>
-            <span id="fsSeconds" class="bg-Hibualamo px-1.5 py-0.5 rounded">19</span>
+          <div class="flex items-center gap-1.5 text-Hibualamo font-extrabold text-sm sm:text-base tracking-tight uppercase">
+            <i class="fa-solid fa-fire text-amber-500"></i> PRODUK TERLARIS
           </div>
         </div>
-        <span class="text-[11px] text-slate-500 font-medium">Harga spesial berakhir sebentar lagi!</span>
       </div>
 
-      <!-- Flash Sale Grid (Dikecilkan Sedikit) -->
+      <!-- Produk Terlaris Grid (Dikecilkan Sedikit) -->
       <div id="flashSaleGrid" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-2.5">
         <!-- Flash Sale Card 1 -->
         <div data-product-id="PRD-001" class="bg-white border border-orange-100 rounded-lg p-1.5 sm:p-2 hover:shadow-md transition cursor-pointer flex flex-col justify-between group">
@@ -655,17 +646,12 @@
           <input
             id="trackInput"
             type="text"
-            placeholder="Masukkan ID Pesanan (contoh: ORD-1001) atau No. WA..."
+            placeholder="Masukkan ID Pesanan atau No. WhatsApp..."
             class="flex-1 px-3.5 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:border-Hibualamo"
           >
           <button type="button" data-action="search-tracking" class="bg-Hibualamo hover:bg-Hibualamo-dark text-white font-bold text-xs px-4 py-2 rounded-xl shadow cursor-pointer">
             Cari
           </button>
-        </div>
-
-        <div class="flex items-center gap-2 text-[11px] text-slate-500">
-          <span>Contoh cek cepat:</span>
-          <button type="button" data-sample-track="ORD-1001" class="text-Hibualamo font-bold underline cursor-pointer">ORD-1001</button>
         </div>
 
         <div id="trackingResultContainer" class="space-y-3"></div>
@@ -812,7 +798,7 @@
               <div class="flex items-center justify-between pt-1">
                 <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
                   <input id="admProdFlash" type="checkbox" class="w-4 h-4 accent-Hibualamo rounded">
-                  <span>Tampilkan di FLASH SALE</span>
+                  <span>Tampilkan di PRODUK TERLARIS</span>
                 </label>
                 <button type="button" id="btnSaveProduct" data-action="admin-save-product" class="bg-Hibualamo hover:bg-Hibualamo-dark text-white font-bold px-5 py-2 rounded-xl shadow cursor-pointer">
                   <i class="fa-solid fa-floppy-disk mr-1"></i> Simpan Produk
@@ -1234,25 +1220,7 @@
         { id: 'REV-004', idProduk: 'PRD-003', nama: 'Dewi K***', rating: 5, komentar: 'Layar AMOLED-nya jernih banget, kelihatan seperti jam tangan mahal!', varian: 'Rose Gold', tanggal: '15 Februari 2025, 11:30' },
         { id: 'REV-005', idProduk: 'PRD-005', nama: 'Fajar M***', rating: 5, komentar: 'Coklat lumernya melimpah, pisangnya gak keras sama sekali.', varian: 'Coklat Lumer', tanggal: '16 Februari 2025, 16:05' }
       ],
-      orders: [
-        {
-          idPesanan: 'ORD-1001',
-          tanggal: '2025-02-18 14:20:00',
-          namaPembeli: 'Budi Santoso',
-          noWa: '081234567890',
-          alamat: 'Jl. Sudirman No. 45, Kec. Setiabudi, Jakarta Selatan',
-          ringkasanItem: '1x TWS Earbuds Bluetooth 5.3 (Hitam)',
-          items: [{ id: 'PRD-001', nama: 'TWS Earbuds Bluetooth 5.3 Bass Hifi', varian: 'Hitam', harga: 99000, qty: 1 }],
-          subtotal: 99000,
-          ongkir: 10000,
-          diskonVoucher: 0,
-          totalBayar: 109000,
-          kurir: 'Reguler',
-          metodeBayar: 'QRIS',
-          status: 'Dikirim',
-          noResi: 'JP9981234567'
-        }
-      ]
+      orders: []
     };
 
     let state = {
@@ -1761,8 +1729,8 @@
         const savedOrders = localStorage.getItem('HibualamoStore_orders');
         if (savedOrders) {
           const parsedOrders = JSON.parse(savedOrders);
-          if (Array.isArray(parsedOrders) && parsedOrders.length > 0) {
-            state.localOrders = parsedOrders;
+          if (Array.isArray(parsedOrders)) {
+            state.localOrders = parsedOrders.filter(o => o && o.idPesanan !== 'ORD-1001');
           }
         }
         const savedPin = localStorage.getItem('HibualamoStore_adminPin');
@@ -2611,13 +2579,23 @@
       openModal('orderSuccessModal');
     }
 
-    function openTrackingModal() {
+    function openTrackingModal(autoSearch = false) {
       openModal('trackingModal');
-      const currentInput = document.getElementById('trackInput').value.trim();
-      if (currentInput) {
+      const trackInputEl = document.getElementById('trackInput');
+      const container = document.getElementById('trackingResultContainer');
+      if (autoSearch && trackInputEl && trackInputEl.value.trim() !== '') {
         searchTrackingOrder();
-      } else if (state.localOrders.length > 0) {
-        renderTrackingResults(state.localOrders);
+      } else {
+        if (trackInputEl) trackInputEl.value = '';
+        if (container) {
+          container.innerHTML = `
+            <div class="text-center py-8 bg-slate-50 rounded-xl border border-slate-200">
+              <i class="fa-solid fa-magnifying-glass text-2xl text-slate-300 mb-2"></i>
+              <p class="font-bold text-xs text-slate-700">Lacak Pesanan Anda</p>
+              <p class="text-[11px] text-slate-400 mt-1">Masukkan ID Pesanan atau Nomor WhatsApp di atas untuk melihat status pesanan.</p>
+            </div>
+          `;
+        }
       }
     }
 
@@ -2642,7 +2620,7 @@
           container.innerHTML = `
             <div class="text-center py-8 bg-slate-50 rounded-xl border border-slate-200">
               <p class="font-bold text-xs text-slate-700">Pesanan tidak ditemukan</p>
-              <p class="text-[11px] text-slate-400 mt-1">Pastikan ID Pesanan (misal ORD-1001) atau Nomor WA sudah benar.</p>
+              <p class="text-[11px] text-slate-400 mt-1">Pastikan ID Pesanan atau Nomor WA sudah benar.</p>
             </div>
           `;
           return;
@@ -2655,10 +2633,33 @@
 
     function renderTrackingResults(orders) {
       const container = document.getElementById('trackingResultContainer');
-      const steps = ['Belum Bayar', 'Dikemas', 'Dikirim', 'Selesai'];
 
       container.innerHTML = orders.map(ord => {
-        const currentIdx = Math.max(0, steps.indexOf(ord.status));
+        const rawStatus = String(ord.status || 'Belum Bayar').trim();
+        const normalizedStatus = rawStatus === 'Dikemas' ? 'Diproses' : rawStatus;
+        const isUnpaid = normalizedStatus === 'Belum Bayar';
+        const isCancelled = normalizedStatus === 'Dibatalkan';
+
+        const paymentStepLabel = isUnpaid ? 'Belum Bayar' : 'Sudah Bayar';
+        const steps = [paymentStepLabel, 'Diproses', 'Dikirim', 'Selesai'];
+
+        let currentIdx = 0;
+        if (normalizedStatus === 'Belum Bayar' || normalizedStatus === 'Sudah Bayar') {
+          currentIdx = 0;
+        } else if (normalizedStatus === 'Diproses') {
+          currentIdx = 1;
+        } else if (normalizedStatus === 'Dikirim') {
+          currentIdx = 2;
+        } else if (normalizedStatus === 'Selesai') {
+          currentIdx = 3;
+        }
+
+        const badgeColorClass = isCancelled
+          ? 'bg-red-100 text-red-600'
+          : isUnpaid
+            ? 'bg-amber-100 text-amber-700'
+            : 'bg-emerald-100 text-emerald-700';
+
         const prodIdForRev = (ord.items && ord.items[0] ? ord.items[0].id : 'PRD-001');
         return `
           <div class="border border-slate-200 rounded-xl p-4 space-y-3 bg-white shadow-sm">
@@ -2667,9 +2668,16 @@
                 <span class="text-xs font-extrabold text-Hibualamo">${ord.idPesanan}</span>
                 <span class="text-[11px] text-slate-400 ml-2">${ord.tanggal}</span>
               </div>
-              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-orange-100 text-Hibualamo">
-                ${ord.status}
-              </span>
+              <div class="flex items-center gap-1.5">
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold ${badgeColorClass}">
+                  ${isCancelled ? 'Dibatalkan' : paymentStepLabel}
+                </span>
+                ${!isUnpaid && !isCancelled && normalizedStatus !== 'Sudah Bayar' ? `
+                  <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-Hibualamo">
+                    ${normalizedStatus}
+                  </span>
+                ` : ''}
+              </div>
             </div>
 
             <div class="text-xs space-y-1 text-slate-600">
@@ -2677,15 +2685,22 @@
               <p><strong class="text-slate-800">Produk:</strong> ${ord.ringkasanItem}</p>
               <p><strong class="text-slate-800">Kurir & Resi:</strong> ${ord.kurir} — <span class="font-mono font-bold text-slate-800">${ord.noResi || '-'}</span></p>
               <p><strong class="text-slate-800">Total Bayar:</strong> <span class="font-extrabold text-Hibualamo">Rp${formatRupiah(ord.totalBayar)}</span> (${ord.metodeBayar})</p>
+              <p><strong class="text-slate-800">Status Pesanan:</strong> <span class="font-bold text-slate-800">${isCancelled ? 'Dibatalkan' : `${paymentStepLabel} - ${normalizedStatus}`}</span></p>
             </div>
 
             <div class="grid grid-cols-4 gap-1 pt-2">
               ${steps.map((st, idx) => {
-                const passed = idx <= currentIdx;
+                const passed = !isCancelled && idx <= currentIdx;
+                const barColor = passed
+                  ? (idx === 0 && isUnpaid ? 'bg-amber-500' : 'bg-Hibualamo')
+                  : 'bg-slate-200';
+                const textColor = passed
+                  ? (idx === 0 && isUnpaid ? 'text-amber-600' : 'text-Hibualamo')
+                  : 'text-slate-400';
                 return `
                   <div class="text-center">
-                    <div class="h-1.5 rounded-full mb-1.5 ${passed ? 'bg-Hibualamo' : 'bg-slate-200'}"></div>
-                    <span class="text-[10px] font-bold ${passed ? 'text-Hibualamo' : 'text-slate-400'}">${st}</span>
+                    <div class="h-1.5 rounded-full mb-1.5 ${barColor}"></div>
+                    <span class="text-[10px] font-bold ${textColor}">${st}</span>
                   </div>
                 `;
               }).join('')}
@@ -3023,9 +3038,10 @@
 
           <div class="flex flex-wrap items-center gap-2">
             <select id="admStatus_${o.idPesanan}" class="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-slate-50 font-semibold">
-              ${['Belum Bayar', 'Dikemas', 'Dikirim', 'Selesai', 'Dibatalkan'].map(st => `
-                <option value="${st}" ${o.status === st ? 'selected' : ''}>${st}</option>
-              `).join('')}
+              ${['Belum Bayar', 'Sudah Bayar', 'Diproses', 'Dikirim', 'Selesai', 'Dibatalkan'].map(st => {
+                const currentSt = o.status === 'Dikemas' ? 'Diproses' : o.status;
+                return `<option value="${st}" ${currentSt === st ? 'selected' : ''}>${st}</option>`;
+              }).join('')}
             </select>
             <input
               id="admResi_${o.idPesanan}"
@@ -3846,7 +3862,7 @@
           else if (act === 'submit-order') submitOrder();
           else if (act === 'success-to-tracking') {
             closeModal('orderSuccessModal');
-            openTrackingModal();
+            openTrackingModal(true);
           }
           else if (act === 'search-tracking') searchTrackingOrder();
           else if (act === 'verify-admin-pin') verifyAdminPin();
