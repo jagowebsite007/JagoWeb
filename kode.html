@@ -1,120 +1,18 @@
 /**
  * FILE: kode.gs
- * Fungsi: Menangani API JSON 2 arah (doPost & doGet) untuk koneksi dari Vercel/Hosting
- * sekaligus mendukung HtmlService, upload gambar ke Google Drive dengan trik
- * lh3.googleusercontent.com, manajemen Supplier, Kategori, Harga Supplier,
+ * Fungsi: Menangani pembuatan halaman HTML (doGet), upload gambar ke Google Drive
+ * dengan trik lh3.googleusercontent.com, manajemen Supplier, Kategori, Harga Supplier,
  * Pengaturan Toko (Logo, Nomor WA Admin, QRIS, Rekening, Gmail), Notifikasi Email Pesanan,
  * Ubah Password Admin, serta transaksi pesanan.
  */
 
 const DEFAULT_ADMIN_PIN = 'Jangan@123';
 
-/**
- * Menangani request GET:
- * - Jika dipanggil dengan parameter ?action=getInitialData (atau dari fetch GET), kembalikan JSON.
- * - Jika dibuka langsung di browser tanpa parameter action, kembalikan JSON data awal jika file index tidak ada di GAS,
- *   atau tampilkan halaman HTML jika index.html ada di GAS.
- */
 function doGet(e) {
-  const action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : '';
-
-  if (action === 'getInitialData' || (e && e.parameter && e.parameter.format === 'json')) {
-    return createJsonResponse(getInitialData());
-  }
-
-  if (action === 'trackOrder') {
-    const keyword = (e && e.parameter && e.parameter.keyword) ? e.parameter.keyword : '';
-    return createJsonResponse(trackOrder(keyword));
-  }
-
-  try {
-    return HtmlService.createHtmlOutputFromFile('index')
-      .setTitle('Hibualamo Store - Belanja Online Murah & Cepat')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  } catch (err) {
-    return createJsonResponse(getInitialData());
-  }
-}
-
-/**
- * Menangani request POST dari Vercel / Hosting Eksternal (API Router 2 Arah)
- * Menggunakan Content-Type: text/plain;charset=utf-8 agar bebas blokir CORS
- */
-function doPost(e) {
-  try {
-    if (!e || !e.postData || !e.postData.contents) {
-      return createJsonResponse({ success: false, message: 'Tidak ada data yang dikirim ke server.' });
-    }
-
-    const body = JSON.parse(e.postData.contents);
-    const action = String(body.action || '');
-    const args = Array.isArray(body.args) ? body.args : [];
-
-    let result;
-    switch (action) {
-      case 'getInitialData':
-        result = getInitialData();
-        break;
-      case 'createOrder':
-        result = createOrder(args[0]);
-        break;
-      case 'trackOrder':
-        result = trackOrder(args[0]);
-        break;
-      case 'submitReview':
-        result = submitReview(args[0]);
-        break;
-      case 'adminGetOrders':
-        result = adminGetOrders(args[0]);
-        break;
-      case 'adminUpdateOrder':
-        result = adminUpdateOrder(args[0], args[1], args[2], args[3]);
-        break;
-      case 'adminUploadImageToDrive':
-        result = adminUploadImageToDrive(args[0], args[1], args[2], args[3]);
-        break;
-      case 'adminSavePaymentSettings':
-        result = adminSavePaymentSettings(args[0], args[1]);
-        break;
-      case 'adminSaveProduct':
-      case 'adminAddProduct':
-        result = adminSaveProduct(args[0], args[1]);
-        break;
-      case 'adminSaveSupplier':
-        result = adminSaveSupplier(args[0], args[1]);
-        break;
-      case 'adminDeleteSupplier':
-        result = adminDeleteSupplier(args[0], args[1]);
-        break;
-      case 'adminAddCategory':
-        result = adminAddCategory(args[0], args[1]);
-        break;
-      case 'adminDeleteCategory':
-        result = adminDeleteCategory(args[0], args[1]);
-        break;
-      case 'adminChangePassword':
-        result = adminChangePassword(args[0], args[1]);
-        break;
-      default:
-        result = { success: false, message: 'Aksi API tidak dikenali: ' + action };
-    }
-
-    return createJsonResponse(result);
-  } catch (err) {
-    return createJsonResponse({
-      success: false,
-      message: 'Error pada server Google Apps Script: ' + err.message
-    });
-  }
-}
-
-/**
- * Helper pembungkus response JSON untuk komunikasi ke Vercel
- */
-function createJsonResponse(data) {
-  return ContentService.createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
+  return HtmlService.createHtmlOutputFromFile('index')
+    .setTitle('Hibualamo Store - Belanja Online Murah & Cepat')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
